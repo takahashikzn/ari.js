@@ -122,7 +122,6 @@
             }, attrs));
 
             this.antlibClassLoader = Java.type('org.apache.tools.ant.Main').class.classLoader;
-            ARI.echo('cl: ' + this.antlibClassLoader);
         });
     };
 
