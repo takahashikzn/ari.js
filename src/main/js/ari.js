@@ -96,7 +96,12 @@
         }
     };
 
+    /**
+     * @param {!string} taskName
+     * @param {!(Object|function())=} attrs
+     */
     ARI.antcallable = function(taskName, attrs) {
+
         return function() {
             var task = project.createTask(taskName);
 
@@ -110,11 +115,21 @@
         };
     };
 
+    /**
+     * @param {!string} taskName
+     * @param {!(Object|function())=} attrs
+     */
     ARI.antcall = function(taskName, attrs) {
         return this.antcallable(taskName, attrs)();
     };
 
+    /**
+     * @param {!string} name
+     * @param {!string} classname
+     * @param {!(Object|function())=} attrs
+     */
     ARI.taskdef = function(name, classname, attrs) {
+
         return this.antcall('taskdef', function() {
             extend(this, extend({
                 name: name,
@@ -125,14 +140,25 @@
         });
     };
 
+    /**
+     * @enum {!string}
+     */
+    ARI.LogLevel = {
+        DEBUG: 'debug',
+        INFO: 'info',
+        WARNING: 'warning',
+        ERROR: 'error'
+    };
+
+    /**
+     * @param {!string} msg
+     * @param {!ARI.LogLevel=} level
+     */
     ARI.echo = function(msg, level) {
+
         return this.antcall('echo', {
             message: msg,
-            level: (function() {
-                if (level) {
-                    return Java.type('org.apache.tools.ant.types.LogLevel')[level.toUpperCase()];
-                }
-            }())
+            level: level && Java.type('org.apache.tools.ant.types.LogLevel')[level.toUpperCase()]
         });
     };
 
