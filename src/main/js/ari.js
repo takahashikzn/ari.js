@@ -2,64 +2,174 @@
 
     var ARI = {};
 
-    var convertToJava = function(cls, val) {
-
-        if (typeof cls === 'string') {
-            cls = Java.type(cls);
-        }
-
-        if (val instanceof cls) {
-            return path;
-        } else {
-            return this.neo(cls, val);
-        }
-    }.bind(ARI);
-
-    var extend = function(obj, attrs) {
-
-        attrs && Object.keys(attrs).forEach(function(x) {
-            if (attrs[x]) {
-                obj[x] = attrs[x];
-            }
-        });
-
-        return obj;
+    var cout = function(msg) {
+        Java.type('java.lang.System').out.println(msg);
     };
 
-    /**
-     * @private
-     * @param {!reentrantEnv} env
-     * @param {!string} methodName
-     * @param {!function()} superMethod
-     * @param {!function()} thisMethod
-     */
-    var reentrant = function(env, methodName, superMethod, thisMethod) {
+    var cerr = function(msg) {
+        Java.type('java.lang.System').err.println(msg);
+    };
 
-        return function() {
-            try {
-                env.stackDepth++;
+    var array = function(ary) {
+        return [].slice.apply(ary);
+    };
 
-                if (1 < env.stackDepth) {
-                    return superMethod.apply(this, arguments);
+    (function() {
+        if (!String.prototype.capitalize) {
+            String.prototype.capitalize = function() {
+                return this[0].toUpperCase() + this.substring(1);
+            };
+        }
+
+        if (!String.prototype.uncapitalize) {
+            String.prototype.uncapitalize = function() {
+                return this[0].toLowerCase() + this.substring(1);
+            };
+        }
+    }());
+
+    var javaOps = {
+
+        nativeClass: (function() {
+
+            var isNativeClass = function(o) {
+                return o['class'] && (o['class'].name === 'java.lang.Class');
+            };
+
+            var forName = function(clazz) {
+
+                if (typeof clazz === 'string') {
+
+                    return Java.type('java.lang.Class').forName(clazz);
+                } else if (isNativeClass(clazz)) {
+
+                    return clazz;
+                } else if (clazz.getName) {
+
+                    return Java.type('java.lang.Class').forName(clazz.getName());
                 } else {
-                    return thisMethod.apply(this, arguments);
+
+                    throw new Error('unrecognizable type: ' + clazz);
                 }
-            } finally {
-                env.stackDepth--;
+            };
+
+            return {
+                java: {
+                    lang: {
+                        Class: forName('java.lang.Class'),
+                        String: forName('java.lang.String'),
+                        System: forName('java.lang.System'),
+                        Boolean: forName('java.lang.Boolean'),
+                        Integer: forName('java.lang.Integer'),
+                        Long: forName('java.lang.Long')
+                    }
+                },
+                of: forName,
+                matches: isNativeClass
+            };
+        }()),
+
+        newInstance: function(clazz) {
+
+            var javaType = (clazz == 'string') ? Java.type(clazz) : clazz;
+
+            return new javaType(array(arguments).slice(1));
+        },
+
+        propType: function(clazz, name) {
+
+            return array(this.nativeClass.of(clazz).getMethods()) //
+            .filter(function(m) {
+                return m.name === ('set' + name.capitalize());
+            }) //
+            .map(function(m) {
+                return m.parameterTypes[0];
+            })[0];
+        },
+
+        toJava: function(cls, val) {
+
+            var javaType;
+            var nativeClass;
+
+            if (typeof cls === 'string') {
+                javaType = Java.type(cls);
+                nativeClass = this.nativeClass.of(cls);
+            } else if (this.nativeClass.matches(cls)) {
+                javaType = Java.type(cls.name);
+                nativeClass = cls;
+            } else {
+                javaType = cls;
+                nativeClass = this.nativeClass.of(cls.getName());
             }
-        };
-    };
 
-    /**
-     * @constructor
-     * @param {!Object=} opts
-     */
-    var reentrantEnv = function(opts) {
+            if (nativeClass.isInstance(val)) {
+                return val;
+            } else {
+                return this.newInstance(javaType, val);
+            }
+        },
 
-        opts = opts || {};
+        isNativeJavaObj: function(o) {
+            return o['class'] && this.nativeClass.matches(o['class']);
+        },
 
-        /** @type {!number} */
-        this.stackDepth = opts.stackDepth || 0;
+        populate: function(obj, attrs) {
+
+            var isJavaObj = this.isNativeJavaObj(obj);
+            var nativeClass = obj['class'];
+
+            attrs && Object.keys(attrs).forEach(function(x) {
+                if (attrs[x]) {
+                    if (isJavaObj) {
+                        obj[x] = this.toJava(javaOps.propType(nativeClass, x), attrs[x]);
+                    } else {
+                        obj[x] = attrs[x];
+                    }
+                }
+            }.bind(this));
+
+            return obj;
+        }
+    }
+
+    var reentrant = {
+
+        /**
+         * @private
+         * @param {!reentrantEnv} env
+         * @param {!string} methodName
+         * @param {!function()} superMethod
+         * @param {!function()} thisMethod
+         */
+        wrap: function(env, methodName, superMethod, thisMethod) {
+
+            return function() {
+                try {
+                    env.stackDepth++;
+
+                    if (1 < env.stackDepth) {
+                        return superMethod.apply(this, arguments);
+                    } else {
+                        return thisMethod.apply(this, arguments);
+                    }
+                } finally {
+                    env.stackDepth--;
+                }
+            };
+        },
+
+        /**
+         * @constructor
+         * @param {!Object=} opts
+         */
+        Env: function(opts) {
+
+            opts = opts || {};
+
+            /** @type {!number} */
+            this.stackDepth = opts.stackDepth || 0;
+        }
     };
 
     ARI.prop = function(name) {
@@ -77,11 +187,11 @@
 
             case 'file':
             case 'File':
-                return convertToJava('java.io.File', attrs);
+                return javaOps.toJava('java.io.File', attrs);
 
             case 'url':
             case 'URL':
-                return convertToJava('java.net.URL', attrs);
+                return javaOps.toJava('java.net.URL', attrs);
 
             default:
                 var data = project.createDataType(name);
@@ -89,7 +199,7 @@
                 if (attrs instanceof Function) {
                     attrs.apply(data);
                 } else {
-                    extend(data, attrs);
+                    javaOps.populate(data, attrs);
                 }
 
                 return data;
@@ -108,7 +218,7 @@
             if (attrs instanceof Function) {
                 attrs.apply(task, arguments);
             } else {
-                extend(task, attrs);
+                javaOps.populate(task, attrs);
             }
 
             return task.perform();
@@ -131,7 +241,7 @@
     ARI.taskdef = function(name, classname, attrs) {
 
         return this.antcall('taskdef', function() {
-            extend(this, extend({
+            javaOps.populate(this, javaOps.populate({
                 name: name,
                 classname: classname
             }, attrs));
@@ -179,8 +289,7 @@
     };
 
     ARI.neo = function(clazz) {
-        var cls = (typeof clazz === 'string') ? Java.type(clazz) : clazz;
-        return new cls([].slice.call(arguments, 1));
+        return javaOps.newInstance.apply(arguments);
     };
 
     Object.keys(ARI).forEach(function(x) {
@@ -194,13 +303,13 @@
             try {
                 return superMethod.apply(this, arguments);
             } catch (e) {
-                ARI.error(x + ': ' + e.message);
+                ARI.error(x + ': ' + e.message + '\n' + e.stack);
                 throw e;
             }
         };
 
-        ARI[x] = reentrant(env, x, superMethod, thisMethod);
-    }.bind(new reentrantEnv()));
+        ARI[x] = reentrant.wrap(env, x, superMethod, thisMethod);
+    }.bind(new reentrant.Env()));
 
     return ARI;
 }());
